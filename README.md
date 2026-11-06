@@ -1,5 +1,6 @@
-# etw2001-retail-sales-data-analysis
+# ETW2001 Retail Sales Data Analysis
 Retail Sales Data Analysis Mar 2026 – Apr 2026
+
 Monash U | R | Data Manipulation | Statistical Analysis
 
 - Analyzed large retail transaction dataset using R
