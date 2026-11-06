@@ -1,0 +1,417 @@
+---
+title: "ETW2001 Assignment 1"
+author: "Eman Arsyad Bin Mohd Azahar"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Load the Dataset
+
+```{r}
+store_data <- read.csv("superstore.csv", stringsAsFactors = FALSE)
+head(store_data)
+str(store_data)
+names(store_data)
+unique(store_data$Ship.Mode)
+
+# install dpylr package if needed
+# install.packages("tidyverse")
+library(tidyverse)
+```
+
+## Question 1
+
+```{r}
+# Focus on orders of countries that appear more than 200 times
+more_than_200 <- store_data %>%
+  group_by(Country) %>%
+  filter(n() > 200)
+
+result <- more_than_200 %>%
+  group_by(Country) %>%
+  
+  # Filter transactions where shipping cost > average shipping cost of their country
+  filter(Shipping.Cost > mean(Shipping.Cost)) %>%
+  
+  # Add new measure : Profit.CostRatio
+  mutate(Profit.CostRatio = Profit / Shipping.Cost) %>%
+  
+  # Arrange in descending order based on new measure
+  arrange(desc(Profit.CostRatio)) %>%
+  
+  # Select needed columns
+  select(Customer.Name, Product.Name, Country, Sales, Profit, Shipping.Cost, Profit.CostRatio) %>%
+  
+  # Show top 15
+  head(15)
+
+result
+```
+
+## Question 2
+
+```{r}
+# Calculate the overall median profit
+overall_median_profit <- median(store_data$Profit[store_data$Sales > 0])
+
+result <- store_data %>%
+  # Group by Market and Year
+  group_by(Market, Year) %>%
+  
+  # Ignore transactions with zero or negative sales
+  filter(Sales > 0) %>%
+  
+  # Calculate the yearly average profit
+  summarise(
+    yearly_average_profit = mean(Profit), 
+    average_sales = mean(Sales), # keep Sales in summary
+    orders = n(),
+    .groups = "drop"
+  ) %>%
+  
+  # Keep groups that have at least 50 orders
+  filter(orders >= 50) %>%
+  
+  # Find markets whose yearly average profit never drops below the overall median
+  group_by(Market) %>%
+  filter(all(yearly_average_profit >= overall_median_profit)) %>%
+  
+  # Present markets in descending order of their average sales
+  summarise(average_sales = mean(average_sales)) %>%
+  arrange(desc(average_sales)) %>%
+  
+  # Show first 10 rows
+  head(10)
+
+result
+```
+
+## Question 3
+
+```{r}
+# Get all suspicious records
+suspicous_records <- store_data %>%
+  # Focus on sub categories
+  group_by(Sub.Category) %>%
+  
+  # Find the threshold of discounts to identify Discounts that are unusually high
+  mutate(
+    typical_discount = median(Discount),
+    threshold = quantile(Discount, 0.75) + 1.5 * IQR(Discount),
+  ) %>%
+  
+  # Isolate records
+  filter(Discount > threshold)
+
+result <- suspicous_records %>%
+  # Create label dividing the records into "loss-making" and "non-loss-making"
+  mutate(Loss.Status = ifelse(Profit < 0, "loss-making", "non-loss-making")) %>%
+  
+  # Group by Market, Segment and the new label
+  group_by(Market, Segment, Loss.Status) %>%
+  
+  # Get the number of suspicious records for each Market-Segment
+  summarise(Suspicous.Count = n(), .groups = "drop") %>%
+  
+  # Get the proportion of suspicious records that are loss making
+  group_by(Market, Segment) %>%
+  mutate(Share = Suspicous.Count / sum(Suspicous.Count)) %>%
+  
+  # Filter the records that are loss making and the share is above 40%
+  filter(Loss.Status == "loss-making", Share > 0.4) %>%
+  
+  # Sort from highest to lowest
+  arrange(desc(Share))
+
+result
+```
+
+## Question 4
+
+```{r}
+# Create function for code reuse
+screening_func <- function(data) {
+  # Keep track of the running total
+  running_total <- 0
+  
+  # Loop through the dataset
+  for (i in 1:nrow(data)) {
+    
+    # Skip if quantity < 2
+    if (data$Quantity[i] < 2) {
+      next
+    }
+    
+    # Update running total
+    running_total <- running_total + data$Profit[i]
+    
+    # Stop and save row index if running total reaches more than 25000
+    if (running_total > 25000) {
+      stop_row <- i
+      break
+    }
+  }
+
+  # Report 
+  data[i, c("Order.ID", "Customer.Name")] %>%
+    mutate(Running.Total = running_total)
+}
+
+# Call function on original dataset
+screening_func(store_data)
+
+# Sort data from highest sales to lowest
+sorted_store_data <- store_data %>%
+  arrange(desc(Sales))
+
+# Call function on sorted dataset
+screening_func(sorted_store_data)
+```
+
+## Question 5
+
+```{r}
+result <- store_data %>%
+  
+  # Count the number of transactions of each group of Product ID and Country
+  group_by(Product.ID, Country) %>%
+  mutate(Transactions = n()) %>%
+  
+  # Count the products that are sold in at least 4 different countries
+  group_by(Product.ID, Product.Name) %>%
+  mutate(count = n()) %>%
+  filter(count >= 4) %>%
+  
+  # Get each Product's own median discount
+  mutate(Discount.Median = median(Discount)) %>%
+  
+  # Compute the average profit when high discount and low discount
+  summarise(
+    Profit.HighDiscount = mean(Profit[Discount > Discount.Median]),
+    Profit.LowDiscount = mean(Profit[Discount <= Discount.Median]),
+    
+    # Compare and compute the gap between the average profits
+    Profit.Gap = Profit.HighDiscount - Profit.LowDiscount,
+    .groups = "drop"
+  ) %>%
+  
+  # Isolate products that still perform better with a high discount
+  filter(Profit.Gap > 0) %>%
+  
+  # Order by the gap
+  arrange(desc(Profit.Gap)) %>%
+  
+  # Show first 5 rows
+  head(5)
+
+result
+```
+
+## Question 6
+
+```{r}
+result <- store_data %>%
+  
+  # Get total sales of each city in each market
+  group_by(Market, City) %>%
+  mutate(Total.CitySales = sum(Sales)) %>%
+  
+  # Get the total market sales 
+  mutate(Total.MarketSale = sum(Total.CitySales)) %>%
+  
+  # Compute each city share of the market sale
+  mutate(City.MarketShare = Total.CitySales / Total.MarketSale) %>%
+  
+  # Find the city with the greatest share in each market
+  filter(City.MarketShare == max(City.MarketShare)) %>%
+  
+  # Keep cities that contribute more than 1/3 of market sales
+  group_by(Market, Segment) %>%
+  filter(City.MarketShare > 1/3) %>%
+  
+  # Report
+  select(City, Market, Segment, City.MarketShare) %>%
+  arrange(desc(City.MarketShare)) %>%
+  head(10)
+
+result
+```
+
+## Question 7
+
+```{r}
+report <- store_data %>%
+  
+  # Construct a new score where higher score means better performance
+  mutate(Performance.Score = Profit - (Discount * Sales) - Shipping.Cost) %>%
+  
+  # Isolate orders placed in the final quarter of each year
+  filter(substr(Order.Date, 6, 7) >= "10") %>%
+  
+  # Identify top scorers of each year in each region
+  group_by(Region, Year) %>%
+  filter(Performance.Score == max(Performance.Score)) %>%
+  
+  # Determine products that appears repeatedly across year in each region
+  group_by(Region, Product.ID) %>%
+  mutate(count = n()) %>%
+  filter(count == max(count))
+
+# Report
+View(report)
+```
+
+## Question 8
+
+```{r}
+shipping_df <- store_data %>%
+  
+  # Compute shipping days
+  mutate(Ship.Days = as.Date(Ship.Date, format = "%Y-%m-%d") - as.Date(Order.Date, format = "%Y-%m-%d")) %>%
+  
+  # Get the average ship days of each priority in each ship mode
+  group_by(Ship.Mode, Order.Priority) %>%
+  summarise(Average.ShipDays = mean(Ship.Days), .groups = "drop") %>%
+  
+  # Ignore missing and impossible records
+  filter(!is.na(Average.ShipDays) | Average.ShipDays > 0) %>%
+  
+  # Assign ranks to priority and sort by rank
+  mutate(Priority.Rank = ifelse( Order.Priority == "Critical", 1, ifelse(Order.Priority == "High", 2, ifelse(Order.Priority == "Medium", 3, ifelse(Order.Priority == "Low", 4, NA))))) %>%
+  arrange(Ship.Mode, Priority.Rank)
+
+# Create vector to keep count of each unexpected cases of each ship mode
+Unexpected.Cases <- c("Same Day" = 0, "First Class" = 0, "Second Class" = 0, "Standard Class" = 0)
+
+# Loop through each record and check if record i is smaller than i - 1
+for (i in 1:nrow(shipping_df)) {
+  if (i == 1) {
+    next
+  }
+  
+  # Ensure to check within the same ship mode
+  if (shipping_df$Ship.Mode[i] == shipping_df$Ship.Mode[i-1]) {
+    if (shipping_df$Average.ShipDays[i] < shipping_df$Average.ShipDays[i-1]) {
+      
+      # Update vector
+      Unexpected.Cases[shipping_df$Ship.Mode[i]] <- Unexpected.Cases[shipping_df$Ship.Mode[i]] + 1
+    }
+  }
+}
+
+# Convert vector into a data frame with their ship mode
+result <- data.frame(Ship.Mode = names(Unexpected.Cases),
+           Unexpected.Counts = as.integer(Unexpected.Cases)) %>%
+  
+  # Isolate ship modes with cases and sort
+  filter(Unexpected.Counts > 0) %>%
+  arrange(desc(Unexpected.Counts))
+
+result
+```
+
+## Question 9
+
+```{r}
+# Get all valid weeks
+valid_weeks <- store_data %>%
+  
+  # Get total sales and total profit for each week
+  group_by(Year, weeknum) %>%
+  summarise(Total.Sales = sum(Sales), Total.Profit = sum(Profit), .groups = "drop") %>%
+  
+  # Filter out weeks with negative profit
+  filter(Total.Profit > 0)
+
+total_valid_sales <- valid_weeks %>%
+  group_by(Year) %>%
+  # Get the total of valid sales for each year
+  summarise(Total.ValidSales = sum(Total.Sales))
+
+# Create vectors
+years_vector <- c()
+triggering_weeks_vector <- c()
+cumulative_sales_vector <- c()
+total_weeks_vector <- c()
+
+# Loop through each year
+for (year in unique(valid_weeks$Year)) {
+  
+  # Take records of the current year
+  year_records <- valid_weeks %>% filter(Year == year)
+  
+  # Compute the 20% threshold of the year's total valid sales
+  threshold <- 
+    total_valid_sales$Total.ValidSales[total_valid_sales$Year == year] * 0.20
+  
+  # Keep track of cumulative sales and total weeks
+  cumulative_sales <- 0
+  total_weeks <- 0
+  
+  # Loop through each week of the year
+  for (i in 1:nrow(year_records)) {
+    
+    # Check if cumulative sales has gone above the threshold 
+    if(cumulative_sales > threshold) {
+      
+      # Update vectors
+      years_vector <- c(years_vector, year)
+      triggering_weeks_vector <- c(triggering_weeks_vector, year_records$weeknum[i])
+      cumulative_sales_vector <- c(cumulative_sales_vector, cumulative_sales)
+      total_weeks_vector <- c(total_weeks_vector, total_weeks)
+      break
+    }
+    
+    # Update cumulative sales with the next week's total sales and update total weeks
+    cumulative_sales <- cumulative_sales + year_records$Total.Sales[i]
+    total_weeks <- total_weeks + 1
+  }
+}
+
+# Convert vectors into a data frame for report
+result <- data.frame(
+  Year = years_vector,
+  Triggering.Week = triggering_weeks_vector,
+  Cumulative.Sales = cumulative_sales_vector,
+  Total.Weeks = total_weeks_vector
+)
+
+result
+```
+
+## Question 10
+
+```{r}
+# Compute dataset-wide average of profitability and shipping per unit
+overall_average_profitability <- mean(store_data$Profit[store_data$Sales > 0] / store_data$Sales[store_data$Sales > 0])
+
+overall_average_shipping_perunit <- mean(store_data$Shipping.Cost / store_data$Quantity)
+
+result <- store_data %>%
+  
+  # Focus on State and Sub category
+  group_by(State, Sub.Category) %>%
+  
+  # Keep combinations that have at least 30 rows
+  filter(n() >= 30) %>%
+  
+  # Create the two new metrics
+  mutate(Profitability = Profit / Sales,
+         Shipping.PerUnit = Shipping.Cost / Quantity) %>%
+  
+  # Retain combinations
+  filter(Profitability < overall_average_profitability & Shipping.PerUnit > overall_average_shipping_perunit) %>%
+  
+  # Rank by worst profitability
+  group_by(Region) %>%
+  arrange(Profitability) %>%
+  
+  # Keep top 3 per Region
+  slice_head(n = 3)
+
+result
+```
